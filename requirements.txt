@@ -1,0 +1,7 @@
+streamlit
+pandas
+pytesseract
+Pillow
+pdfplumber
+matplotlib
+reportlab

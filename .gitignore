@@ -1,0 +1,20 @@
+# Python virtual environment
+venv/
+*.env
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Trained model directory (can be large and should be reproducible)
+ner_model/
+
+# Uploads directory
+uploads/
+
+# Temporary files from our app
+temp_chart.png
+simplified_report.pdf
+
+# VS Code settings
+.vscode/
