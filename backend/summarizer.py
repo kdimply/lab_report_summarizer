@@ -57,3 +57,33 @@ def generate_summary(analyzed_df, diagnosis):
     
     summary += "\n---\n**Disclaimer:** This is an AI-generated summary for informational purposes only. Please consult with your doctor."
     return summary
+
+# (Keep all your existing code in summarizer.py)
+# Add this new code at the very bottom of the file:
+
+CONNECTIONS_KNOWLEDGE_BASE = {
+    "Possible Iron Deficiency Anemia": {
+        "required": [("HEMOGLOBIN", "Low"), ("MCV", "Low")],
+        "Insight": "Your report shows both **low Hemoglobin** and **low MCV** (an indicator of small red blood cells). This combination is often seen in cases of iron deficiency anemia. It would be a good idea to discuss this pattern with your doctor."
+    },
+    "Signs of Metabolic Stress": {
+        "required": [("GLUCOSE", "High"), ("TRIGLYCERIDES", "High")],
+        "Insight": "The combination of **high Blood Glucose** and **high Triglycerides** can be a sign of metabolic stress. Focusing on a diet low in sugar and refined carbs, along with regular exercise, is often recommended by health professionals."
+    }
+}
+
+def find_possible_connections(analyzed_df):
+    insights = []
+    abnormal_results = analyzed_df[analyzed_df['Status'].isin(['Low', 'High'])]
+    
+    for connection, rules in CONNECTIONS_KNOWLEDGE_BASE.items():
+        all_conditions_met = True
+        for test, status in rules['required']:
+            if not any((test in name.upper()) and (stat == status) for name, stat in zip(abnormal_results['Test Name'], abnormal_results['Status'])):
+                all_conditions_met = False
+                break
+        
+        if all_conditions_met:
+            insights.append(rules['Insight'])
+    
+    return insights

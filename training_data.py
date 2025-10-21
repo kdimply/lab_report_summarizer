@@ -1,36 +1,36 @@
 # training_data.py
 
-# Our "Master" dataset with over 30 high-quality, diverse examples.
-# This will build our most powerful and flexible model yet.
+# Our final, "Advanced" dataset with over 35 examples.
+# This version includes multi-line formats to build our most robust model.
 
 TRAIN_DATA = [
-    # --- Set 1: Various CBC Formats ---
-    ("Test Name Result Normal Range Units Hemoglobin 12.1 11.0-16.0 g/dL WBC 6.7 4.5-11.0 10^3/uL Platelet Count 256 150-450 10^3/uL",
-     {"entities": [(36, 46, "TEST_NAME"), (47, 51, "VALUE"), (52, 61, "REFERENCE_RANGE"), (67, 70, "TEST_NAME"), (71, 74, "VALUE"), (75, 83, "REFERENCE_RANGE"), (92, 106, "TEST_NAME"), (107, 110, "VALUE"), (111, 118, "REFERENCE_RANGE")]}),
-    ("CBC Results: Hemoglobin 10.5 g/dL (13.5-17.5), Hematocrit 32 % (38-50), RBC 3.1 10^6/uL (4.5-5.9)",
-     {"entities": [(13, 23, "TEST_NAME"), (24, 28, "VALUE"), (35, 45, "REFERENCE_RANGE"), (48, 58, "TEST_NAME"), (59, 61, "VALUE"), (65, 70, "REFERENCE_RANGE"), (73, 76, "TEST_NAME"), (77, 80, "VALUE"), (89, 96, "REFERENCE_RANGE")]}),
-    ("White Blood Cell Count 15.2 10^3/uL (4.5-11.0)",
-     {"entities": [(0, 22, "TEST_NAME"), (23, 27, "VALUE"), (36, 44, "REFERENCE_RANGE")]}),
-    ("Red Blood Cell Count 5.8 4.50-5.90. White Blood Cells 8.0 4.5-11.0.",
-     {"entities": [(0, 20, "TEST_NAME"), (21, 24, "VALUE"), (25, 34, "REFERENCE_RANGE"), (36, 53, "TEST_NAME"), (54, 57, "VALUE"), (58, 66, "REFERENCE_RANGE")]}),
+    # --- Set 1: Various CBC Formats (including multi-line) ---
+    ("Test Name Result Normal Range Units Hemoglobin 12.1 11.0-16.0 g/dL WBC 6.7 4.5-11.0 10^3/uL",
+     {"entities": [(36, 46, "TEST_NAME"), (47, 51, "VALUE"), (52, 61, "REFERENCE_RANGE"), (67, 70, "TEST_NAME"), (71, 74, "VALUE"), (75, 83, "REFERENCE_RANGE")]}),
+    ("CBC Results: Hemoglobin 10.5 g/dL (13.5-17.5), Hematocrit 32 % (38-50)",
+     {"entities": [(13, 23, "TEST_NAME"), (24, 28, "VALUE"), (35, 45, "REFERENCE_RANGE"), (48, 58, "TEST_NAME"), (59, 61, "VALUE"), (65, 70, "REFERENCE_RANGE")]}),
+    ("White Blood Cell Count\nResult: 15.2 (4.5-11.0)",
+     {"entities": [(0, 22, "TEST_NAME"), (31, 35, "VALUE"), (37, 45, "REFERENCE_RANGE")]}),
+    ("Red Blood Cell Count 5.8 4.50-5.90",
+     {"entities": [(0, 20, "TEST_NAME"), (21, 24, "VALUE"), (25, 34, "REFERENCE_RANGE")]}),
     ("Hemoglobin: 9.8 g/dL", {"entities": [(0, 10, "TEST_NAME"), (12, 18, "VALUE")]}),
     ("WBC Count: 11,000 /cmm", {"entities": [(0, 9, "TEST_NAME"), (11, 22, "VALUE")]}),
     ("Diagnosis: Mild anemia with leukocytosis.", {"entities": [(11, 46, "DIAGNOSIS")]}),
 
     # --- Set 2: Various Lipid & Cholesterol Formats ---
-    ("LIPID PROFILE: Total Cholesterol 245 mg/dL <200, LDL Cholesterol 160 mg/dL <100, HDL Cholesterol 35 mg/dL >40",
-     {"entities": [(16, 33, "TEST_NAME"), (34, 37, "VALUE"), (44, 48, "REFERENCE_RANGE"), (50, 65, "TEST_NAME"), (66, 69, "VALUE"), (76, 80, "REFERENCE_RANGE"), (82, 97, "TEST_NAME"), (98, 100, "VALUE"), (107, 110, "REFERENCE_RANGE")]}),
+    ("LIPID PROFILE: Total Cholesterol 245 mg/dL <200, LDL Cholesterol 160 mg/dL <100",
+     {"entities": [(16, 33, "TEST_NAME"), (34, 37, "VALUE"), (44, 48, "REFERENCE_RANGE"), (50, 65, "TEST_NAME"), (66, 69, "VALUE"), (76, 80, "REFERENCE_RANGE")]}),
     ("Test: Total Cholesterol, Value: 210, Range: <200",
      {"entities": [(6, 23, "TEST_NAME"), (32, 35, "VALUE"), (44, 48, "REFERENCE_RANGE")]}),
     ("HDL Cholesterol: 65 mg/dL, Normal: >40",
      {"entities": [(0, 15, "TEST_NAME"), (17, 19, "VALUE"), (36, 39, "REFERENCE_RANGE")]}),
-    ("TRIGLYCERIDES 190 mg/dl 50-150",
-     {"entities": [(0, 13, "TEST_NAME"), (14, 17, "VALUE"), (24, 31, "REFERENCE_RANGE")]}),
+    ("TRIGLYCERIDES\n190 mg/dl (50-150)",
+     {"entities": [(0, 13, "TEST_NAME"), (14, 17, "VALUE"), (25, 32, "REFERENCE_RANGE")]}),
     ("Diagnosis: Normal lipid profile.", {"entities": [(11, 36, "DIAGNOSIS")]}),
 
     # --- Set 3: Various Metabolic, Liver & Kidney Formats ---
-    ("RENAL FUNCTION: Creatinine 1.4 mg/dL 0.6-1.2, Blood Urea Nitrogen 25 mg/dL 7-20",
-     {"entities": [(17, 27, "TEST_NAME"), (28, 31, "VALUE"), (38, 45, "REFERENCE_RANGE"), (47, 66, "TEST_NAME"), (67, 69, "VALUE"), (76, 80, "REFERENCE_RANGE")]}),
+    ("Creatinine\n1.4 mg/dL\nRef: 0.6-1.2",
+     {"entities": [(0, 10, "TEST_NAME"), (11, 14, "VALUE"), (26, 33, "REFERENCE_RANGE")]}),
     ("Blood Sugar (Fasting): 135 mg/dL", {"entities": [(0, 22, "TEST_NAME"), (24, 32, "VALUE")]}),
     ("HbA1c: 7.2%", {"entities": [(0, 5, "TEST_NAME"), (7, 11, "VALUE")]}),
     ("Diagnosis: Indicates Type 2 Diabetes.", {"entities": [(11, 39, "DIAGNOSIS")]}),
@@ -43,15 +43,16 @@ TRAIN_DATA = [
     ("Bilirubin: 0.9 mg/dL", {"entities": [(0, 9, "TEST_NAME"), (11, 19, "VALUE")]}),
 
     # --- Set 4: Various Thyroid, Vitamin & Iron Formats ---
-    ("Thyroid Stimulating Hormone (TSH) 5.1 uIU/mL 0.4-4.0",
-     {"entities": [(0, 31, "TEST_NAME"), (32, 35, "VALUE"), (43, 50, "REFERENCE_RANGE")]}),
+    ("Thyroid Stimulating Hormone (TSH)\n5.1 uIU/mL (Normal 0.4-4.0)",
+     {"entities": [(0, 31, "TEST_NAME"), (32, 35, "VALUE"), (49, 56, "REFERENCE_RANGE")]}),
     ("TSH: 5.8 µIU/mL", {"entities": [(0, 3, "TEST_NAME"), (5, 14, "VALUE")]}),
     ("T3: 1.2 ng/mL", {"entities": [(0, 2, "TEST_NAME"), (4, 12, "VALUE")]}),
     ("Diagnosis: Borderline hypothyroidism.", {"entities": [(11, 40, "DIAGNOSIS")]}),
     ("Vitamin B12: 220 pg/mL", {"entities": [(0, 11, "TEST_NAME"), (13, 21, "VALUE")]}),
     ("Vitamin D3: 15 ng/mL", {"entities": [(0, 10, "TEST_NAME"), (12, 19, "VALUE")]}),
     ("Diagnosis: Vitamin D deficiency detected.", {"entities": [(11, 47, "DIAGNOSIS")]}),
-    ("Serum Iron: 50 µg/dL", {"entities": [(0, 10, "TEST_NAME"), (12, 19, "VALUE")]}),
+    ("Serum Iron\nResult: 50 ug/dL",
+     {"entities": [(0, 10, "TEST_NAME"), (19, 21, "VALUE")]}),
     ("Diagnosis: Mild iron deficiency anemia.", {"entities": [(11, 45, "DIAGNOSIS")]}),
 
     # --- Set 5: Different Layouts & Edge Cases ---

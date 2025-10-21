@@ -5,3 +5,7 @@ Pillow
 pdfplumber
 matplotlib
 reportlab
+spacy
+thefuzz
+python-Levenshtein
+google-generativeai

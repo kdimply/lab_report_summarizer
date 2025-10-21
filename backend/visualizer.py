@@ -36,3 +36,30 @@ def create_visual_summary(analyzed_df):
     plt.tight_layout()
     
     return fig
+# In backend/visualizer.py, add this function at the bottom
+import pandas as pd # Make sure to import pandas
+
+def create_trend_graph(test_name_to_track):
+    try:
+        history_df = pd.read_csv('report_history.csv')
+        history_df['Date'] = pd.to_datetime(history_df['Date'])
+        test_df = history_df[history_df['Test Name'] == test_name_to_track]
+        
+        if len(test_df) < 2:
+            return None # Not enough data for a trend
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(test_df['Date'], test_df['Value'], marker='o', linestyle='-')
+        ax.set_title(f'Trend for {test_name_to_track} Over Time')
+        ax.set_xlabel('Date')
+        ax.set_ylabel('Value')
+        plt.grid(True)
+        plt.tight_layout()
+        return fig
+    except FileNotFoundError:
+        return None
+    
+    # (Keep all your existing code in visualizer.py)
+# Add this new code at the very bottom of the file:
+import pandas as pd # Make sure pandas is imported at the top of the file
+
