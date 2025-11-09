@@ -9,3 +9,7 @@ spacy
 thefuzz
 python-Levenshtein
 google-generativeai
+sqlalchemy
+passlib[bcrypt]
+email-validator
+python-dotenv

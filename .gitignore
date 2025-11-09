@@ -1,20 +1,15 @@
-# Python virtual environment
-venv/
-*.env
-
-# Python cache files
+# Python cache
 __pycache__/
 *.pyc
 
-# Trained model directory (can be large and should be reproducible)
-ner_model/
+# Virtual environments
+venv/
+.env/
 
-# Uploads directory
+# Streamlit uploads & local DB
 uploads/
+instance.db
+*.db
 
-# Temporary files from our app
-temp_chart.png
-simplified_report.pdf
-
-# VS Code settings
-.vscode/
+# API keys or sensitive files
+backend/ask_ai.py

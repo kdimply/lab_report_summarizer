@@ -1,121 +1,147 @@
-# app.py
+# ---------------- AI Health Tracker (main app) ----------------
+from backend.db import init_db
+init_db()  # Ensure tables exist before anything else
 
 import streamlit as st
-import os
-import pandas as pd
+import re
+from backend.session_manager import init_session, login_user, logout_user, get_current_user
+from backend.auth import create_user, authenticate_user
+from backend.password_reset import request_password_reset, reset_password
 
-# Import all your backend functions
-from backend.extractor import process_report
-from backend.analyzer import analyze_results
-from backend.summarizer import generate_summary, find_possible_connections
-from backend.visualizer import create_visual_summary
-from backend.report_generator import generate_pdf_report
-from backend.ask_ai import get_ai_answer
+# ---------------- Streamlit Setup ----------------
+st.set_page_config(page_title="AI Health Tracker", page_icon="🩺", layout="wide")
 
-st.set_page_config(page_title="Lab Report Summarizer", page_icon="🩺", layout="wide")
+# Initialize session
+init_session()
 
-# --- UI and Styling ---
-st.markdown("<h1 style='text-align: center; color: #4a4a4a;'>AI Lab Report Summarizer</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center; color: #6a6a6a;'>Your Personal Health Report Assistant</h3>", unsafe_allow_html=True)
+# Clear transient flags
+if "just_logged_in" in st.session_state:
+    del st.session_state["just_logged_in"]
+if "just_signed_up" in st.session_state:
+    del st.session_state["just_signed_up"]
 
-# --- Session State Initialization ---
-if 'processing_done' not in st.session_state:
-    st.session_state.processing_done = False
-if 'processed_data' not in st.session_state:
-    st.session_state.processed_data = None
+st.title("🩺 AI Health Tracker")
+st.markdown("""
+Welcome to **AI Lab Report Summarizer**, your personal AI-powered health companion.  
+Use the sidebar to navigate between pages like **Upload Reports**, **Dashboard**, **History**, and **Profile**.
+""")
 
-# --- File Uploader ---
-uploaded_file = st.file_uploader("Upload your lab report (PDF or Image) to begin", type=["pdf", "png", "jpg", "jpeg"])
+# ---------------- Helper: Password Strength Checker ----------------
+def check_password_strength(password: str) -> str:
+    """Returns Weak / Medium / Strong based on password strength."""
+    length = len(password)
+    has_upper = bool(re.search(r"[A-Z]", password))
+    has_lower = bool(re.search(r"[a-z]", password))
+    has_num = bool(re.search(r"\d", password))
+    has_sym = bool(re.search(r"[!@#$%^&*(),.?\":{}|<>]", password))
+    score = sum([has_upper, has_lower, has_num, has_sym])
 
-# --- Main Processing Logic ---
-if uploaded_file is not None and not st.session_state.processing_done:
-    upload_dir = "uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, uploaded_file.name)
-    
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    if length < 6:
+        return "Too Short"
+    elif score <= 2:
+        return "Weak"
+    elif score == 3:
+        return "Medium"
+    else:
+        return "Strong"
 
-    with st.spinner('🔬 Your report is being analyzed by our AI expert system...'):
-        extracted_df, diagnosis, raw_text = process_report(file_path)
-        
-        if extracted_df.empty and not diagnosis:
-            st.error("Analysis Failed: Could not extract any valid medical data from the report.")
-            st.session_state.processed_data = None
-        else:
-            analyzed_df = analyze_results(extracted_df)
-            
-            # Generate all components for the report
-            summary = generate_summary(analyzed_df, diagnosis)
-            connections = find_possible_connections(analyzed_df)
-            fig = create_visual_summary(analyzed_df)
-            
-            # Store everything in session state
-            st.session_state.processed_data = {
-                "analyzed_df": analyzed_df, "summary": summary, "fig": fig,
-                "diagnosis": diagnosis, "raw_text": raw_text, "connections": connections
-            }
-    
-    os.remove(file_path) # Clean up uploaded file
-    st.session_state.processing_done = True
-    st.rerun() # Rerun the script to show the results
 
-# --- Display Results ---
-if st.session_state.processing_done and st.session_state.processed_data:
-    data = st.session_state.processed_data
-    
-    st.success("Analysis Complete!")
+# ---------------- Login / Signup / Reset ----------------
+if not st.session_state.logged_in:
+    with st.expander("🔒 Login or Sign Up", expanded=True):
+        col1, col2 = st.columns(2)
 
-    # Main Display Area
-    col1, col2 = st.columns([2, 1.5])
-    with col1:
-        st.markdown(data["summary"])
-        # Feature: Possible Connections
-        if data["connections"]:
-            st.markdown("---")
-            st.subheader("🔗 Possible Connections")
-            for insight in data["connections"]:
-                st.warning(f"**Insight:** {insight}")
-    with col2:
-        if data["fig"]:
-            st.pyplot(data["fig"])
-        else:
-            st.info("A visual summary graph could not be generated for this report.")
+        # ----------- LOGIN -----------
+        with col1:
+            st.subheader("Login")
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_pass")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Login", use_container_width=True):
+                if not email or not password:
+                    st.warning("Please enter both email and password.")
+                else:
+                    try:
+                        user = authenticate_user(email.strip(), password.strip())
+                        if user:
+                            login_user(user.to_dict())
+                            st.session_state["just_logged_in"] = True
+                            st.success(f"Welcome back, **{user.email}** 🎉")
+                            st.experimental_rerun()
+                        else:
+                            st.error("Invalid email or password.")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
-    # Feature: Ask AI
+        # ----------- SIGNUP -----------
+        with col2:
+            st.subheader("Sign Up")
+            su_email = st.text_input("Email", key="signup_email")
+            su_name = st.text_input("Full Name (optional)", key="signup_name")
+            su_pass = st.text_input("Password", type="password", key="signup_pass")
+            su_pass2 = st.text_input("Confirm Password", type="password", key="signup_pass2")
+
+            # Password strength indicator
+            if su_pass:
+                strength = check_password_strength(su_pass)
+                color = {"Too Short": "red", "Weak": "red", "Medium": "orange", "Strong": "green"}[strength]
+                st.markdown(f"**Password Strength:** <span style='color:{color}'>{strength}</span>", unsafe_allow_html=True)
+
+            if st.button("Create Account", use_container_width=True):
+                if not su_email or not su_pass:
+                    st.warning("Please enter both email and password.")
+                elif su_pass != su_pass2:
+                    st.error("Passwords do not match.")
+                else:
+                    try:
+                        user = create_user(su_email.strip(), su_pass.strip(), full_name=su_name.strip() or None)
+                        login_user(user.to_dict())
+                        st.session_state["just_signed_up"] = True
+                        st.success("🎉 Account created successfully! You are now logged in.")
+                        st.experimental_rerun()
+                    except ValueError as e:
+                        if "already registered" in str(e).lower():
+                            st.error("This email is already registered. Please try logging in instead.")
+                        else:
+                            st.error(str(e))
+                    except Exception as e:
+                        st.error(str(e))
+
+    # ----------- PASSWORD RESET SECTION -----------
+    with st.expander("🔑 Forgot Password?"):
+        reset_email = st.text_input("Enter your registered email:")
+        if st.button("Send Reset Link"):
+            success, message = request_password_reset(reset_email.strip())
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+        reset_code = st.text_input("Enter Reset Code (from email simulation):")
+        new_pass = st.text_input("New Password", type="password")
+        confirm_new_pass = st.text_input("Confirm New Password", type="password")
+
+        if st.button("Reset Password"):
+            if new_pass != confirm_new_pass:
+                st.error("Passwords do not match.")
+            else:
+                success, message = reset_password(reset_code.strip(), new_pass)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+
+# ---------------- Logged-in State ----------------
+else:
+    current_user = get_current_user()
+    st.success(f"✅ Logged in as: **{current_user.get('email')}**")
+
     st.markdown("---")
-    st.subheader("💬 Ask AI a Question About Your Report")
-    user_question = st.text_input("Example: 'What does high LDL mean?' or 'Why is my WBC high?'")
-    if st.button("Get AI Explanation"):
-        if user_question:
-            with st.spinner("AI is thinking..."):
-                ai_response = get_ai_answer(data['summary'], user_question)
-                st.info(ai_response)
-        else:
-            st.warning("Please enter a question.")
+    st.subheader("📈 Welcome to Your Health Dashboard")
+    st.info("Use the sidebar to upload your lab reports and view AI-generated summaries, graphs, and trends.")
 
-    # PDF Download and Expanders
-    st.markdown("---")
-    st.subheader("⬇️ Download Your Simplified Report")
-    with st.spinner("Generating your PDF report..."):
-        chart_path = "temp_chart.png" if data["fig"] else None
-        if chart_path: data["fig"].savefig(chart_path)
-        pdf_path = "Simplified_Lab_Report.pdf"
-        generate_pdf_report(data["analyzed_df"], data["summary"], chart_path, pdf_path)
-        with open(pdf_path, "rb") as pdf_file: PDFbyte = pdf_file.read()
-        st.download_button(label="Download PDF Report", data=PDFbyte, file_name="Simplified_Lab_Report.pdf", mime='application/octet-stream')
-        if chart_path and os.path.exists(chart_path): os.remove(chart_path)
-        if os.path.exists(pdf_path): os.remove(pdf_path)
-    
-    with st.expander("Show Detailed Results Table"):
-        st.dataframe(data["analyzed_df"])
-    with st.expander("Show Raw Extracted Text"):
-        st.text_area("Raw Text:", data["raw_text"], height=200)
-
-if st.session_state.processing_done:
-    if st.button('Analyze Another Report'):
-        st.session_state.processing_done = False
-        st.session_state.processed_data = None
-        st.rerun()
+    if st.button("Logout", type="secondary", use_container_width=True):
+        logout_user()
+        st.info("You have logged out successfully.")
+        st.experimental_rerun()
