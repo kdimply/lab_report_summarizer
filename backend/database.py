@@ -1,91 +1,98 @@
 # backend/database.py
 import os
-import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
+import pandas as pd
+from pymongo import MongoClient
 
-# --- Setup the local SQLite DB ---
-DB_FILE = os.environ.get("LAB_APP_DB", "instance.db")
-DATABASE_URL = f"sqlite:///{DB_FILE}"
+# ---------------- MONGO CONNECTION ----------------
+MONGO_URI = os.environ.get(
+    "MONGO_URI",
+    "mongodb+srv://dimply:Dimply2004@lab-cluster.csxjcka.mongodb.net/?retryWrites=true&w=majority"
+)
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
-
-
-# --- Define Tables ---
-class ReportRecord(Base):
-    __tablename__ = "report_records"
-    id = Column(Integer, primary_key=True)
-    username = Column(String(255), index=True)  # email or typed username
-    test_name = Column(String(255))
-    value = Column(Float)
-    status = Column(String(50))
-    diagnosis = Column(Text, nullable=True)
-    upload_date = Column(DateTime, default=datetime.utcnow)
-    filename = Column(String(255), nullable=True)
+client = MongoClient(MONGO_URI)
+db = client["lab_report_db"]
+reports_col = db["reports"]
 
 
-def init_db():
-    """Creates the table if it doesn't exist."""
-    Base.metadata.create_all(bind=engine)
-
-
-# --- Save report data ---
-def save_report_to_db(username: str, analyzed_df: pd.DataFrame, diagnosis: str = None, filename: str = None):
+# ------------------------------------------------------------
+# SAVE — FULL REPORT (for Upload Page)
+# ------------------------------------------------------------
+def save_full_report_to_db(username, analyzed_df, summary, diagnosis, raw_text, chart_path, filename):
     """
-    Saves each test from the analyzed DataFrame into the database,
-    linked to the username and current date.
+    Saves EVERYTHING into MongoDB:
+      - username
+      - test results
+      - summary
+      - diagnosis
+      - raw extracted text
+      - chart (base64 image)
+      - filename
+      - upload timestamp
     """
-    init_db()
-    session = SessionLocal()
+
+    # Convert tests to list of objects
+    tests = []
+    for _, row in analyzed_df.iterrows():
+        tests.append({
+            "test_name": row["Test Name"],
+            "value": float(row["Value"]),
+            "status": row["Status"]
+        })
+
+    # Convert chart → base64 (optional)
+    chart_base64 = None
+    if chart_path:
+        try:
+            with open(chart_path, "rb") as img_file:
+                import base64
+                chart_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+        except:
+            chart_base64 = None
+
+    # Build document
+    doc = {
+        "username": username,
+        "upload_date": datetime.utcnow(),
+        "filename": filename,
+        "summary": summary,
+        "diagnosis": diagnosis,
+        "raw_text": raw_text,
+        "tests": tests,
+        "chart_b64": chart_base64
+    }
+
+    # Insert into MongoDB
     try:
-        upload_date = datetime.utcnow()
-
-        # Ensure the expected columns exist
-        if not all(col in analyzed_df.columns for col in ["Test Name", "Value", "Status"]):
-            raise ValueError("Analyzed DataFrame must contain 'Test Name', 'Value', and 'Status' columns.")
-
-        for _, row in analyzed_df.iterrows():
-            rec = ReportRecord(
-                username=username,
-                test_name=str(row["Test Name"]),
-                value=float(row["Value"]),
-                status=str(row["Status"]),
-                diagnosis=diagnosis,
-                upload_date=upload_date,
-                filename=filename
-            )
-            session.add(rec)
-        session.commit()
+        reports_col.insert_one(doc)
     except Exception as e:
-        session.rollback()
-        raise e
-    finally:
-        session.close()
+        raise RuntimeError(f"Error saving report: {e}")
 
 
-# --- Fetch user history ---
-def get_user_history(username: str) -> pd.DataFrame:
-    """
-    Returns a DataFrame of all past reports for the given username.
-    Columns: test_name, value, status, upload_date
-    """
-    init_db()
-    session = SessionLocal()
+# ------------------------------------------------------------
+# HISTORY — RETURN ALL REPORTS
+# ------------------------------------------------------------
+def get_user_history(username):
     try:
-        records = session.query(ReportRecord).filter_by(username=username).order_by(ReportRecord.upload_date).all()
-        if not records:
-            return pd.DataFrame()
+        history = list(
+            reports_col.find({"username": username}, {"_id": 0})
+                        .sort("upload_date", 1)
+        )
+        return history
+    except Exception as e:
+        raise RuntimeError(f"Error fetching history: {e}")
 
-        data = [{
-            "test_name": r.test_name,
-            "value": r.value,
-            "status": r.status,
-            "upload_date": r.upload_date
-        } for r in records]
 
-        return pd.DataFrame(data)
-    finally:
-        session.close()
+# ------------------------------------------------------------
+# LAST TWO — FOR COMPARISON
+# ------------------------------------------------------------
+def get_last_two_reports(username):
+    try:
+        last_two = list(
+            reports_col.find({"username": username}, {"_id": 0})
+                        .sort("upload_date", -1)
+                        .limit(2)
+        )
+        return last_two
+    except Exception as e:
+        raise RuntimeError(f"Error fetching comparison reports: {e}")

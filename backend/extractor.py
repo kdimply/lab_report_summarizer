@@ -1,141 +1,184 @@
-# backend/extractor.py
-
+# extractor.py (updated)
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageFilter, ImageEnhance
 import pdfplumber
 import pandas as pd
 import os
-import spacy
 import re
 from thefuzz import process
 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Set OCR path (keep your configuration)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# Our 'master list' of valid test names for self-correction
 VALID_TEST_NAMES = [
-    'HEMOGLOBIN', 'RBC COUNT', 'WBC COUNT', 'PLATELET COUNT', 'HEMATOCRIT', 
-    'MCV', 'MCH', 'MCHC', 'RDW', 'TOTAL CHOLESTEROL', 'LDL CHOLESTEROL', 
-    'HDL CHOLESTEROL', 'TRIGLYCERIDES', 'GLUCOSE', 'HBA1C', 'CREATININE', 'UREA', 
-    'SODIUM', 'POTASSIUM', 'ALT', 'AST', 'BILIRUBIN', 'TSH', 'T3', 'T4', 
-    'VITAMIN B12', 'VITAMIN D', 'SERUM IRON', 'LYMPHOCYTES', 'NEUTROPHILS', 'MONOCYTES'
+    "HEMOGLOBIN", "HEMATOCRIT", "RBC", "RBC COUNT", "WBC", "WBC COUNT",
+    "NEUTROPHILS", "LYMPHOCYTES", "MONOCYTES", "MCV", "MCH", "MCHC", "RDW",
+    "PLATELET", "PLATELET COUNT",
+    "TOTAL CHOLESTEROL", "LDL CHOLESTEROL", "HDL CHOLESTEROL", "TRIGLYCERIDES",
+    "GLUCOSE", "HBA1C", "UREA", "CREATININE",
+    "SODIUM", "POTASSIUM",
+    "ALT", "AST", "BILIRUBIN",
+    "TSH", "T3", "T4",
+    "VITAMIN D", "VITAMIN B12", "SERUM IRON"
 ]
 
-try:
-    nlp_ner = spacy.load("./ner_model")
-except OSError:
-    nlp_ner = None 
+# ----------- IMAGE PREPROCESSING -----------
+def preprocess_image(img):
+    img = img.convert("L")
+    img = img.filter(ImageFilter.SHARPEN)
+    img = ImageEnhance.Contrast(img).enhance(2)
+    img = ImageEnhance.Brightness(img).enhance(1.2)
+    return img
 
-def extract_text_from_image(image_path):
+# ----------- TEXT EXTRACTION -----------
+def extract_text_from_pdf(path):
     try:
-        return pytesseract.image_to_string(Image.open(image_path))
-    except Exception as e:
-        return f"Error processing image: {e}"
-
-def extract_text_from_pdf(pdf_path):
-    text = ""
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
+        text = ""
+        with pdfplumber.open(path) as pdf:
             for page in pdf.pages:
-                text += page.extract_text() + "\n"
-        return text
+                t = page.extract_text()
+                if t:
+                    text += "\n" + t
+        return text if text.strip() else "Error: No text"
     except Exception as e:
-        return f"Error processing PDF: {e}"
+        return f"Error: PDF failed ({e})"
 
-def correct_test_name(messy_name):
-    """Uses fuzzy string matching to find the best match for a messy test name."""
-    best_match, score = process.extractOne(messy_name.upper(), VALID_TEST_NAMES)
-    if score > 70: # Lowered threshold slightly for more flexibility
-        return best_match
+def extract_text_from_image(path):
+    try:
+        img = Image.open(path)
+        img = preprocess_image(img)
+        return pytesseract.image_to_string(img)
+    except Exception as e:
+        return f"Error: Image failed ({e})"
+
+# ----------- TEST NAME CORRECTION -----------
+def correct_test_name(name):
+    if not isinstance(name, str):
+        return None
+    name = re.sub(r'[^A-Za-z0-9 ]', ' ', name).upper().strip()
+    best, score = process.extractOne(name, VALID_TEST_NAMES)
+    return best if score and score > 65 else None
+
+# ----------- REFERENCE RANGE PARSING -----------
+def parse_reference_range(raw_range):
+    if not raw_range or str(raw_range).strip().upper() in ("NONE", "N/A", "NAN"):
+        return None
+    s = str(raw_range).strip()
+    s_clean = s.replace("(", "").replace(")", "").replace("NORMAL RANGE", "").replace("REFERENCE", "").strip()
+
+    # comparator formats < or >
+    m = re.search(r'([<>])\s*([0-9]+(?:\.[0-9]+)?)', s_clean)
+    if m:
+        op, num = m.group(1), float(m.group(2))
+        return (None, float(num), op)
+
+    # inclusive ranges like 13 - 17 or 13.0-17.0 or en-dash
+    m2 = re.search(r'([0-9]+(?:\.[0-9]+)?)\s*[-–—]\s*([0-9]+(?:\.[0-9]+)?)', s_clean)
+    if m2:
+        low, high = float(m2.group(1)), float(m2.group(2))
+        return (low, high, None)
+
+    # single number fallback
+    m3 = re.search(r'([0-9]+(?:\.[0-9]+)?)', s_clean)
+    if m3:
+        num = float(m3.group(1))
+        if '<' in s or 'LESS' in s.upper():
+            return (None, num, '<')
+        if '>' in s or 'GREATER' in s.upper():
+            return (num, None, '>')
+        return (num, None, None)
     return None
 
-def parse_lab_report(text):
-    """
-    A more advanced parser that can handle multi-line entities and self-corrects test names.
-    """
-    if nlp_ner is None:
-        return pd.DataFrame(), None, "NER model not loaded. Please train the model first."
+# ----------- VALUE & UNIT PARSING -----------
+def parse_value_and_unit(raw_value):
+    if raw_value is None:
+        return None, ""
+    s = str(raw_value).strip()
+    # numeric with possible scientific notation and percentage
+    m = re.search(r'([-+]?\d*\.\d+|\d+e[+-]?\d+|\d+)', s, flags=re.I)
+    if not m:
+        return None, ""
+    num = m.group(0)
+    try:
+        val = float(num)
+    except:
+        try:
+            val = float(num.replace(',', ''))
+        except:
+            return None, ""
+    unit = s[m.end():].strip()
+    if unit == "%" or unit.startswith("%"):
+        unit = "%"
+    return val, unit
 
-    doc = nlp_ner(text)
-    results = []
-    diagnoses = []
-    
-    # First, extract all entities and their positions
-    entities = [{'text': ent.text, 'label': ent.label_, 'start': ent.start_char, 'end': ent.end_char} for ent in doc.ents]
-    
-    # Process diagnoses separately
-    for ent in entities:
-        if ent['label'] == 'DIAGNOSIS':
-            diagnoses.append(ent['text'])
-    
-    # Group Test Names with their nearby Values and Ranges
-    test_entities = [ent for ent in entities if ent['label'] == 'TEST_NAME']
-    value_entities = [ent for ent in entities if ent['label'] == 'VALUE']
-    range_entities = [ent for ent in entities if ent['label'] == 'REFERENCE_RANGE']
+# ----------- MAIN PARSER -----------
+def parse_report_text(text):
+    text = text.replace("—", "-").replace("–", "-").replace("|", " ").replace("•", " ")
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    for test_ent in test_entities:
-        corrected_name = correct_test_name(test_ent['text'])
-        if not corrected_name:
-            continue # Skip if the test name is not valid
+    records = []
+    # stricter regex: name followed by number (with optional unit) and optional parenthesized range
+    for line in lines:
+        # try to capture: NAME <space> VALUE[unit] (RANGE)
+        m = re.search(
+            r'([A-Za-z][A-Za-z \(\)\-]{1,60}?)\s+([-+]?\d*\.\d+|\d+e[+-]?\d+|\d+)\s*([A-Za-z%/µg\.\d]*)\s*(\([^\)]*\))?',
+            line
+        )
+        if not m:
+            # fallback looser but still anchored
+            m = re.search(
+                r'([A-Za-z][A-Za-z \(\)\-]{1,60}?)[:\-\s]\s*([-+]?\d*\.\d+|\d+e[+-]?\d+|\d+)\s*([A-Za-z%/µg\.\d]*)',
+                line
+            )
+        if not m:
+            continue
 
-        current_result = {"Test Name": corrected_name}
-        
-        # Define a search window to find associated values/ranges (e.g., within the next 50 characters)
-        search_window = 50 
-        
-        # Find the closest VALUE entity within the window
-        closest_value = None
-        min_dist_val = float('inf')
-        for val_ent in value_entities:
-            dist = val_ent['start'] - test_ent['end']
-            if 0 <= dist < min_dist_val and dist < search_window:
-                min_dist_val = dist
-                closest_value = val_ent
-        
-        if closest_value:
-            try:
-                current_result["Value"] = float(closest_value['text'])
-            except ValueError:
-                continue # Skip if value is not a number
+        raw_name = m.group(1).strip()
+        raw_value = m.group(2).strip()
+        raw_unit = m.group(3).strip() if m.lastindex and m.lastindex >= 3 else ""
+        raw_range = m.group(4).strip() if m.lastindex and m.lastindex >= 4 and m.group(4) else None
 
-        # Find the closest REFERENCE_RANGE entity within the window
-        closest_range = None
-        min_dist_range = float('inf')
-        for range_ent in range_entities:
-            dist = range_ent['start'] - test_ent['end']
-            if 0 <= dist < min_dist_range and dist < search_window:
-                min_dist_range = dist
-                closest_range = range_ent
-        
-        if closest_range:
-            current_result["Reference Range"] = closest_range['text']
+        fixed_name = correct_test_name(raw_name)
+        if not fixed_name:
+            continue
 
-        if "Value" in current_result:
-             results.append(current_result)
+        # parse numeric value + unit
+        val, unit = parse_value_and_unit(raw_value + (" " + raw_unit if raw_unit else ""))
+        if val is None:
+            continue
 
-    final_diagnosis = ". ".join(diagnoses) if diagnoses else None
-    
-    # Remove duplicate results if any, keeping the first one
-    df = pd.DataFrame(results)
-    df = df.drop_duplicates(subset=['Test Name'], keep='first')
-    
-    return df, final_diagnosis, None
+        parsed_range = parse_reference_range(raw_range) if raw_range else None
 
+        records.append({
+            "Test Name": fixed_name,
+            "Value": val,
+            "Unit": unit,
+            "Reference Range Raw": raw_range if raw_range else "",
+            "Reference Range Parsed": parsed_range
+        })
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+
+    df["Test Name"] = df["Test Name"].astype(str)
+    df["Reference Range Raw"] = df["Reference Range Raw"].astype(str)
+    return df
+
+# ----------- MAIN ENTRY POINT -----------
 def process_report(file_path):
-    _, file_extension = os.path.splitext(file_path)
-    text = ""
-    if file_extension.lower() == '.pdf':
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
         text = extract_text_from_pdf(file_path)
-    elif file_extension.lower() in ['.png', 'jpg', 'jpeg']:
-        text = extract_text_from_image(file_path)
     else:
-        return pd.DataFrame(), None, "Unsupported file type."
+        text = extract_text_from_image(file_path)
 
-    if "Error" in text:
+    if not text or "Error" in text:
         return pd.DataFrame(), None, text
-        
-    df, diagnosis, error = parse_lab_report(text) 
-    
-    if error:
-        return pd.DataFrame(), None, error
-        
-    return df, diagnosis, text
+
+    df = parse_report_text(text)
+
+    if df.empty:
+        return pd.DataFrame(), None, "Could not detect test values from the report."
+
+    return df, None, text

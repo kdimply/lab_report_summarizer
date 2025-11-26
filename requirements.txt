@@ -13,3 +13,13 @@ sqlalchemy
 passlib[bcrypt]
 email-validator
 python-dotenv
+
+# MongoDB + Atlas support
+pymongo
+dnspython
+
+# Optional: Better image handling
+opencv-python
+
+# Optional: To avoid warnings
+numpy

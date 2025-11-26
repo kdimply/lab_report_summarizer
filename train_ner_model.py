@@ -1,62 +1,90 @@
 # train_ner_model.py
-
 import spacy
-from spacy.training.example import Example
 import random
+from spacy.training.example import Example
 from pathlib import Path
-from training_data import TRAIN_DATA # Import your labeled data
+from training_data import TRAIN_DATA
 
-def train_spacy_ner_model():
-    """Trains a custom spaCy NER model."""
-    
-    # Define the output directory to save the trained model
-    output_dir = Path("./ner_model")
-    n_iter = 100  # Number of training iterations
+def train_spacy_ner_model(output_dir="./ner_model", n_iter=60):
 
-    # Load a blank English model
+    # ---------------------------------------------------------
+    # INITIAL SETUP
+    # ---------------------------------------------------------
+    print("🔧 Initializing blank spaCy model ('en')...")
     nlp = spacy.blank("en")
-    print("Created blank 'en' model")
 
-    # Create the NER pipeline component
+    # Create NER component
     if "ner" not in nlp.pipe_names:
         ner = nlp.add_pipe("ner", last=True)
     else:
         ner = nlp.get_pipe("ner")
 
-    # Add our custom labels to the NER component
-    for _, annotations in TRAIN_DATA:
-        for ent in annotations.get("entities"):
-            ner.add_label(ent[2])
+    # Add labels dynamically from training data
+    print("📌 Adding labels...")
+    for _, ann in TRAIN_DATA:
+        for start, end, label in ann["entities"]:
+            ner.add_label(label)
 
-    # Get names of other pipes to disable them during training to train only NER
-    pipe_exceptions = ["ner", "trf_wordpiecer", "trf_tok2vec"]
-    unaffected_pipes = [pipe for pipe in nlp.pipe_names if pipe not in pipe_exceptions]
+    # ---------------------------------------------------------
+    # VALIDATE TRAINING DATA (SAFETY CHECK)
+    # ---------------------------------------------------------
+    print("🔍 Validating training data...")
 
-    # Start the training
-    print("Starting training...")
-    with nlp.disable_pipes(*unaffected_pipes):
-        optimizer = nlp.begin_training()
-        for itn in range(n_iter):
-            random.shuffle(TRAIN_DATA)
+    examples = []
+    invalid = []
+
+    for text, ann in TRAIN_DATA:
+        try:
+            example = Example.from_dict(nlp.make_doc(text), ann)
+            examples.append(example)
+        except Exception as e:
+            invalid.append((text, ann, str(e)))
+
+    if invalid:
+        print(f"⚠️ Found {len(invalid)} INVALID samples (will be skipped):")
+        for i in invalid[:5]:
+            print("  ❌", i)
+    else:
+        print("✅ All training samples are valid!")
+
+    print(f"📦 Total valid examples: {len(examples)}")
+
+    # ---------------------------------------------------------
+    # INITIALIZE MODEL
+    # ---------------------------------------------------------
+    print("⚡ Initializing model parameters...")
+    nlp.initialize(lambda: examples)
+
+    # ---------------------------------------------------------
+    # TRAINING LOOP
+    # ---------------------------------------------------------
+    print("🚀 Starting training...\n")
+
+    other_pipes = [p for p in nlp.pipe_names if p != "ner"]
+    with nlp.disable_pipes(*other_pipes):
+
+        optimizer = nlp.create_optimizer()
+
+        for epoch in range(n_iter):
+            random.shuffle(examples)
             losses = {}
-            for text, annotations in TRAIN_DATA:
-                try:
-                    # Create an Example object
-                    example = Example.from_dict(nlp.make_doc(text), annotations)
-                    # Update the model
-                    nlp.update([example], drop=0.5, sgd=optimizer, losses=losses)
-                except Exception as e:
-                    # Some annotations might be misaligned, so we skip them
-                    # In a real project, you would fix these in your training_data.py
-                    pass 
-            
-            # Print the losses every 10 iterations
-            if itn % 10 == 0:
-                print(f"Iteration {itn}/{n_iter}, Losses: {losses}")
 
-    # Save the trained model to the output directory
+            for batch in spacy.util.minibatch(examples, size=8):
+                nlp.update(batch, sgd=optimizer, drop=0.3, losses=losses)
+
+            if epoch % 5 == 0:
+                print(f"🟢 Epoch {epoch}/{n_iter} | Loss: {losses}")
+
+    # ---------------------------------------------------------
+    # SAVE MODEL
+    # ---------------------------------------------------------
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     nlp.to_disk(output_dir)
-    print(f"✅ Saved trained model to '{output_dir}'")
+
+    print("\n🎉 Training Complete!")
+    print(f"📁 Model saved at: {output_dir}")
+
 
 if __name__ == "__main__":
-    train_spacy_ner_model()
+    train_spacy_ner_model(n_iter=60)

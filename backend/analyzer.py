@@ -1,9 +1,8 @@
+# analyzer.py (updated)
 import pandas as pd
 import re
 
-# ✅ --- UPGRADED KNOWLEDGE BASE OF STANDARD RANGES ---
 STANDARD_RANGES = {
-    # CBC
     'HEMOGLOBIN': (13.5, 17.5),
     'RBC': (4.5, 5.9),
     'WBC': (4500, 11000),
@@ -16,133 +15,123 @@ STANDARD_RANGES = {
     'LYMPHOCYTES': (20, 40),
     'NEUTROPHILS': (50, 70),
     'MONOCYTES': (2, 8),
-
-    # Lipids
     'TOTAL CHOLESTEROL': ('<', 200),
     'LDL CHOLESTEROL': ('<', 100),
     'HDL CHOLESTEROL': ('>', 40),
     'TRIGLYCERIDES': ('<', 150),
-
-    # Metabolic
     'GLUCOSE': (70, 100),
     'HBA1C': ('<', 5.7),
     'CREATININE': (0.6, 1.2),
     'UREA': (7, 20),
     'SODIUM': (136, 146),
     'POTASSIUM': (3.5, 5.0),
-
-    # Liver
     'ALT': (7, 56),
     'AST': (10, 40),
     'BILIRUBIN': (0.1, 1.2),
-
-    # Thyroid
     'TSH': (0.4, 4.0),
     'T3': (0.8, 1.8),
     'T4': (4.5, 11.7),
-
-    # Vitamins & Iron
     'VITAMIN B12': (200, 900),
     'VITAMIN D': (30, 100),
     'SERUM IRON': (60, 170),
 }
 
-
-# 🧠 --- FRIENDLY CLASSIFICATION LOGIC ---
 def classify_result(value, low, high):
-    """
-    Classifies test results with soft labels like:
-    Slightly Low / Moderately High / Severely High / Normal
-    """
-    if value < low:
-        deviation = (low - value) / low
-        if deviation < 0.1:
-            return "Slightly Low"
-        elif deviation < 0.25:
-            return "Moderately Low"
-        else:
-            return "Severely Low"
-
-    elif value > high:
-        deviation = (value - high) / high
-        if deviation < 0.1:
-            return "Slightly High"
-        elif deviation < 0.25:
-            return "Moderately High"
-        else:
-            return "Severely High"
-
-    else:
+    if low is None and high is not None:
+        if value >= high:
+            return "Slightly High" if (value - high) / max(high, 1e-6) < 0.1 else "High"
         return "Normal"
 
+    if high is None and low is not None:
+        if value <= low:
+            return "Slightly Low" if (low - value) / max(low, 1e-6) < 0.1 else "Low"
+        return "Normal"
 
-# 🩺 --- MAIN ANALYSIS FUNCTION ---
+    if low is not None and high is not None:
+        if value < low:
+            d = (low - value) / max(low, 1e-6)
+            if d < 0.1:
+                return "Slightly Low"
+            if d < 0.25:
+                return "Moderately Low"
+            return "Severely Low"
+        if value > high:
+            d = (value - high) / max(high, 1e-6)
+            if d < 0.1:
+                return "Slightly High"
+            if d < 0.25:
+                return "Moderately High"
+            return "Severely High"
+        return "Normal"
+
+    return "No Range Found"
+
 def analyze_results(df):
-    """
-    Analyzes the DataFrame using a hybrid approach:
-    1. Tries to use the range from the report.
-    2. Falls back to our STANDARD_RANGES knowledge base.
-    3. Adds friendly soft-classification labels.
-    """
-    if df.empty:
+    if df is None or df.empty:
+        if df is None:
+            df = pd.DataFrame()
+        df["Status"] = []
+        df["Reference Range Used"] = []
         return df
 
     statuses = []
     used_ranges = []
 
     for _, row in df.iterrows():
-        status = "Normal"
-        used_range_str = "N/A"
+        test_name = str(row.get("Test Name", "")).strip().upper()
+        raw_val = row.get("Value", None)
+        parsed_range = row.get("Reference Range Parsed", None)
+        raw_range_text = row.get("Reference Range Raw", "")
 
         try:
-            value = float(row["Value"])
-            range_from_report = row.get("Reference Range")
+            value = float(raw_val)
+        except Exception:
+            statuses.append("Invalid Value")
+            used_ranges.append("N/A")
+            continue
 
-            # --- CASE 1: Use range directly from report ---
-            if pd.notna(range_from_report):
-                used_range_str = str(range_from_report)
-                numbers = re.findall(r"[\d\.]+", used_range_str)
+        status = "Normal"
+        used_range_label = "N/A"
 
-                if len(numbers) >= 2:
-                    low, high = float(numbers[0]), float(numbers[-1])
-                    status = classify_result(value, low, high)
-
-                elif len(numbers) == 1:
-                    limit = float(numbers[0])
-                    if "<" in used_range_str and value >= limit:
-                        status = "Slightly High"
-                    elif ">" in used_range_str and value <= limit:
-                        status = "Slightly Low"
-
-            # --- CASE 2: Use STANDARD_RANGES fallback ---
+        # Prefer report-parsed range
+        if parsed_range:
+            low, high, comp = parsed_range
+            status = classify_result(value, low, high)
+            if low is not None and high is not None:
+                used_range_label = f"{low} - {high} (Report)"
+            elif comp == '<' or (comp is None and low is None and high is not None):
+                used_range_label = f"< {high} (Report)"
+            elif comp == '>' or (comp is None and low is not None and high is None):
+                used_range_label = f"> {low} (Report)"
             else:
-                test_name_upper = str(row["Test Name"]).upper()
-                matched_key = next((key for key in STANDARD_RANGES if key in test_name_upper), None)
+                used_range_label = raw_range_text or "Report Range"
+        else:
+            # fallback to STANDARD_RANGES
+            matched = None
+            for key in STANDARD_RANGES:
+                if key in test_name:
+                    matched = key
+                    break
 
-                if matched_key:
-                    standard_range = STANDARD_RANGES[matched_key]
-
-                    if isinstance(standard_range[0], str):
-                        limit = standard_range[1]
-                        used_range_str = f"{standard_range[0]} {limit} (Standard)"
-
-                        if standard_range[0] == "<" and value >= limit:
-                            status = "Slightly High"
-                        elif standard_range[0] == ">" and value <= limit:
-                            status = "Slightly Low"
-
+            if matched:
+                std = STANDARD_RANGES[matched]
+                if isinstance(std[0], str):
+                    op, limit = std
+                    used_range_label = f"{op} {limit} (Standard)"
+                    if op == '<':
+                        status = "Slightly High" if value >= limit else "Normal"
                     else:
-                        low, high = standard_range
-                        used_range_str = f"{low} - {high} (Standard)"
-                        status = classify_result(value, low, high)
+                        status = "Slightly Low" if value <= limit else "Normal"
                 else:
-                    status = "No Range Found"
-
-        except (ValueError, TypeError):
-            status = "Invalid Value"
+                    low, high = std
+                    used_range_label = f"{low} - {high} (Standard)"
+                    status = classify_result(value, low, high)
+            else:
+                status = "No Range Found"
+                used_range_label = "N/A"
 
         statuses.append(status)
-        used_ranges.append(used_range_str)
+        used_ranges.append(used_range_label)
 
     df["Status"] = statuses
     df["Reference Range Used"] = used_ranges

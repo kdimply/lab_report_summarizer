@@ -1,78 +1,117 @@
+# backend/auth.py
+import os
 import hashlib
-from passlib.hash import bcrypt
-from sqlalchemy.orm import Session
+from datetime import datetime
+from passlib.context import CryptContext
 from email_validator import validate_email, EmailNotValidError
+from pymongo import MongoClient
 
-from .db import SessionLocal
-from .models import User
+# ---------- MongoDB Connection ----------
+MONGO_URI = os.environ.get(
+    "MONGO_URI",
+    "mongodb+srv://dimply:Dimply2004@lab-cluster.csxjcka.mongodb.net/?retryWrites=true&w=majority"
+)
 
+client = MongoClient(MONGO_URI)
+db = client["lab_report_db"]
+users_col = db["users"]
 
-# --- Password hashing ---
+# ---------- Password Hashing ----------
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 def hash_password(password: str) -> str:
-    """
-    Safe hashing with SHA256 prehash (removes 72-byte limit).
-    """
+    """Pre-hash using SHA256 → bcrypt (fixes 72-byte bcrypt limit)."""
     if not password:
         raise ValueError("Password cannot be empty.")
-    
+
     sha_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    return bcrypt.using(rounds=12).hash(sha_hash)
+    return pwd_context.hash(sha_hash)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """
-    Verifies password using the same SHA256 prehashing.
-    """
+    """Verify SHA256-prehashed password."""
     if not plain:
         return False
-
     sha_hash = hashlib.sha256(plain.encode("utf-8")).hexdigest()
-    return bcrypt.verify(sha_hash, hashed)
+    return pwd_context.verify(sha_hash, hashed)
 
 
-# --- User management functions ---
-def create_user(email: str, password: str, full_name: str = None):
-    """Creates a new user after validating email and password."""
+# ---------- AGE CALCULATOR ----------
+def calculate_age(dob_str: str):
+    """Calculates age from DOB (format YYYY-MM-DD)."""
+    try:
+        dob = datetime.strptime(dob_str, "%Y-%m-%d")
+        today = datetime.today()
+        return today.year - dob.year - (
+            (today.month, today.day) < (dob.month, dob.day)
+        )
+    except:
+        return None
+
+
+# ---------- CREATE USER ----------
+def create_user(email: str, password: str, full_name: str = None, dob: str = None):
+    """Creates user with full name + DOB + auto age calculation."""
+    # Validate email
     try:
         v = validate_email(email)
         email = v.email
     except EmailNotValidError as e:
         raise ValueError(f"Invalid email: {e}")
 
-    db = SessionLocal()
-    try:
-        existing = db.query(User).filter(User.email == email).first()
-        if existing:
-            raise ValueError("Email already registered.")
+    # Check if email already exists
+    if users_col.find_one({"email": email}):
+        raise ValueError("Email already registered.")
 
-        hashed = hash_password(password)
-        user = User(email=email, password_hash=hashed, full_name=full_name)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
-    finally:
-        db.close()
+    # Hash password
+    hashed = hash_password(password)
+
+    # Age
+    age = calculate_age(dob) if dob else None
+
+    user_doc = {
+        "email": email,
+        "password_hash": hashed,
+        "full_name": full_name.strip() if full_name else "Not Provided",
+        "dob": dob if dob else None,
+        "age": age,
+        "created_at": datetime.utcnow()
+    }
+
+    users_col.insert_one(user_doc)
+
+    # DO NOT return password hash to session
+    user_doc.pop("password_hash", None)
+
+    return user_doc
 
 
+# ---------- AUTHENTICATE ----------
 def authenticate_user(email: str, password: str):
-    """Return user if credentials are correct, else None."""
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            return None
-        if not verify_password(password, user.password_hash):
-            return None
-        return user
-    finally:
-        db.close()
+    """Returns user document if password matches, else None."""
+    user = users_col.find_one({"email": email})
+    if not user:
+        return None
+
+    if not verify_password(password, user["password_hash"]):
+        return None
+
+    # remove hash before sending to session
+    safe_user = {
+        "email": user["email"],
+        "full_name": user.get("full_name", "Not Provided"),
+        "dob": user.get("dob"),
+        "age": user.get("age")
+    }
+    return safe_user
 
 
-def get_user_by_id(user_id: int):
-    """Get user record by ID."""
-    db = SessionLocal()
-    try:
-        return db.query(User).filter(User.id == user_id).first()
-    finally:
-        db.close()
+# ---------- GET USER ----------
+def get_user_by_email(email: str):
+    user = users_col.find_one({"email": email})
+    if not user:
+        return None
+
+    # clean return
+    user.pop("password_hash", None)
+    return user
